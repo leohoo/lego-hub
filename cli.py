@@ -7,6 +7,7 @@ import sys
 
 from lego_hub import LegoHub
 from config import get_hub_address, save_hub_address
+from xbox_controller import XboxController, InputType
 
 
 async def cmd_scan(args):
@@ -263,10 +264,135 @@ async def cmd_run(args):
                 elif ch == 'l':
                     lights_on = not lights_on
                     await hub.set_lights(100 if lights_on else 0)
+                    print(f"\rSpeed: {speed:4d}  Angle: {angle:4d}  Lights: {'ON ' if lights_on else 'OFF'}", end="", flush=True)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             await hub.stop()
             print("\nDisconnecting...")
+    finally:
+        await hub.disconnect()
+
+    return 0
+
+
+async def cmd_xbox(args):
+    """Control with Xbox controller."""
+    address = args.address or get_hub_address()
+    if not address:
+        print("No hub address. Run 'scan' first or use --address.")
+        return 1
+
+    # Track state for hub commands
+    state = {'speed': 0, 'steer': 0, 'lights': False, 'quit': False, 'braking': False}
+    pending_commands = []
+
+    def on_controller_event(event):
+        """Handle controller events - queue commands for async execution."""
+        if event.input_type == InputType.TRIGGER_RIGHT:
+            state['right_trigger'] = event.value
+            # Don't send drive while braking
+            if not state['braking']:
+                state['speed'] = event.value - state.get('left_trigger', 0)
+                pending_commands.append(('drive', state['speed']))
+        elif event.input_type == InputType.TRIGGER_LEFT:
+            state['left_trigger'] = event.value
+            # Don't send drive while braking
+            if not state['braking']:
+                state['speed'] = state.get('right_trigger', 0) - event.value
+                pending_commands.append(('drive', state['speed']))
+        elif event.input_type == InputType.STICK_LEFT_X:
+            state['steer'] = event.value
+            pending_commands.append(('steer', event.value))
+        elif event.input_type == InputType.BUTTON:
+            if event.value == 2:  # B - brake
+                if event.pressed:
+                    state['braking'] = True
+                    pending_commands.append(('brake',))
+                else:
+                    state['braking'] = False
+                    # Resume driving based on current trigger position
+                    state['speed'] = state.get('right_trigger', 0) - state.get('left_trigger', 0)
+                    if state['speed'] != 0:
+                        # Only release brake and drive if trigger is held
+                        pending_commands.append(('release_brake',))
+                        pending_commands.append(('drive', state['speed']))
+            elif event.pressed:  # Other buttons only on press
+                if event.value == 1:  # A
+                    pending_commands.append(('stop',))
+                elif event.value == 4:  # X
+                    state['lights'] = not state['lights']
+                    pending_commands.append(('lights', state['lights']))
+                elif event.value == 12:  # Menu/Start
+                    state['quit'] = True
+
+
+    # Find Xbox controller
+    print("Looking for Xbox controller...")
+    controller = XboxController(on_event=on_controller_event)
+    if not controller.connect():
+        print("No Xbox controller found.")
+        print("Make sure the controller is connected via Bluetooth.")
+        print("(USB connections don't work on macOS due to driver restrictions)")
+        return 1
+
+    print("Xbox controller connected!")
+
+    # Prime the controller - poll a few times to ensure callbacks are registered
+    for _ in range(5):
+        controller.poll(0.05)
+
+    hub = LegoHub()
+    try:
+        print(f"Connecting to hub at {address}...")
+        await hub.connect(address)
+        print(f"Connected to {hub.name}!")
+        print("Calibrating steering...")
+        await hub.calibrate_steering()
+        print("Ready!\n")
+        print("Xbox controller mode:")
+        print("  Left stick X   - steer")
+        print("  Right trigger  - drive forward")
+        print("  Left trigger   - drive backward")
+        print("  A button       - stop (coast)")
+        print("  B button       - brake")
+        print("  X button       - toggle lights")
+        print("  Start button   - quit\n")
+
+        try:
+            while not state['quit']:
+                # Poll controller (processes HID events, fires callbacks)
+                controller.poll(0.02)
+
+                # Execute pending hub commands (deduplicate: only latest of each type)
+                commands_to_run = {}
+                while pending_commands:
+                    cmd = pending_commands.pop(0)
+                    commands_to_run[cmd[0]] = cmd  # Keep only latest of each type
+
+                for cmd in commands_to_run.values():
+                    if cmd[0] == 'drive':
+                        await hub.drive(cmd[1])
+                    elif cmd[0] == 'steer':
+                        await hub.steer(cmd[1])
+                    elif cmd[0] == 'stop':
+                        await hub.stop()
+                        state['speed'] = 0
+                    elif cmd[0] == 'brake':
+                        await hub.brake()
+                        state['speed'] = 0
+                    elif cmd[0] == 'release_brake':
+                        await hub.release_brake()
+                    elif cmd[0] == 'lights':
+                        await hub.set_lights(100 if cmd[1] else 0)
+
+                # Update display
+                print(f"\rSpeed: {state['speed']:4d}  Steer: {state['steer']:4d}  Lights: {'ON ' if state['lights'] else 'OFF'}", end="", flush=True)
+
+        except KeyboardInterrupt:
+            pass
+
+        print("\n\nStopping...")
+        await hub.stop()
     finally:
         await hub.disconnect()
 
@@ -315,6 +441,9 @@ def main():
     # run (interactive)
     subparsers.add_parser("run", help="Interactive driving mode (keyboard control)")
 
+    # xbox (controller)
+    subparsers.add_parser("xbox", help="Control with Xbox controller (Bluetooth)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -331,6 +460,7 @@ def main():
         "lights": cmd_lights,
         "calibrate": cmd_calibrate,
         "run": cmd_run,
+        "xbox": cmd_xbox,
     }
 
     return asyncio.run(handlers[args.command](args))

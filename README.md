@@ -68,6 +68,27 @@ Controls:
 - `L` - toggle lights
 - `Q` - quit
 
+### 7. Xbox Controller Mode
+
+```bash
+python cli.py xbox
+```
+
+Control the car with an Xbox Series X|S controller connected via Bluetooth.
+
+Controls:
+- Right trigger - drive forward (analog speed 0-100)
+- Left trigger - drive backward (analog speed 0-100)
+- Left stick X - steer left/right
+- A button - stop (coast)
+- B button - brake (hold to brake, release to resume)
+- X button - toggle lights
+- Start button - quit
+
+Notes:
+- USB connections don't work on macOS due to driver restrictions. Use Bluetooth.
+- Known issue: Brake (B button) does not work reliably while driving the car on the ground, but works when testing with the car upside down. Needs further investigation.
+
 ## CLI Commands
 
 | Command | Description |
@@ -80,6 +101,7 @@ Controls:
 | `lights <brightness>` | Set lights (0-100) |
 | `calibrate` | Calibrate steering (find center) |
 | `run` | Interactive keyboard control |
+| `xbox` | Xbox controller control (Bluetooth) |
 
 Options:
 - `--address` / `-a` - Specify hub Bluetooth address (uses saved address if not specified)
