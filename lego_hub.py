@@ -248,19 +248,30 @@ class LegoHub:
         self._current_speed = 0
         self._current_steering = 0
 
+    async def release_brake(self):
+        """Release brake on drive motors (coast)."""
+        # Send coast (0) to individual drive motor ports
+        for port in [50, 51]:
+            cmd = bytearray([0x08, 0x00, 0x81, port, 0x11, 0x51, 0x00, 0])
+            await self._send(cmd)
+
     async def set_lights(self, brightness):
         """
         Set lights brightness.
         brightness: 0 (off) to 100 (full)
 
-        Uses direct port control on port 53 (TECHNIC_MOVE_HUB_LIGHTS).
+        Sends both direct port command (for non-calibrated mode) and
+        combined command (for calibrated mode) to ensure lights work.
         """
-        port = 53  # Lights port
-        brightness = max(0, min(100, int(brightness)))
-        brightness_byte = brightness & 0xFF
-        # StartPower command on lights port
-        cmd = bytearray([0x08, 0x00, 0x81, port, 0x11, 0x51, 0x00, brightness_byte])
+        self._current_lights = max(0, min(100, int(brightness)))
+
+        # Direct port 53 command (works without calibration)
+        port = 53  # TECHNIC_MOVE_HUB_LIGHTS
+        cmd = bytearray([0x08, 0x00, 0x81, port, 0x11, 0x51, 0x00, self._current_lights & 0xFF])
         await self._send(cmd)
+
+        # Also send combined command (works after calibration)
+        await self._send_drive_command(lights=self._current_lights)
 
     # -------------------------------------------------------------------------
     # Hub Actions
