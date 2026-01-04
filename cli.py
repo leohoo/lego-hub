@@ -283,7 +283,7 @@ async def cmd_xbox(args):
         return 1
 
     # Track state for hub commands
-    state = {'speed': 0, 'steer': 0, 'lights': False, 'quit': False, 'braking': False}
+    state = {'speed': 0, 'steer': 0, 'lights': False, 'quit': False, 'braking': False, 'right_trigger': 0, 'left_trigger': 0}
     pending_commands = []
 
     def on_controller_event(event):

@@ -1,7 +1,7 @@
 """
 Xbox Controller support for macOS using IOKit HID.
 
-Based on working cli_controller.py - runs CFRunLoop on main thread.
+Runs CFRunLoop on the main thread to handle HID events.
 """
 
 import ctypes
@@ -55,7 +55,11 @@ iokit.IOHIDManagerCopyDevices.restype = c_void_p
 iokit.IOHIDDeviceScheduleWithRunLoop.argtypes = [c_void_p, c_void_p, c_void_p]
 iokit.IOHIDDeviceOpen.argtypes = [c_void_p, c_uint32]
 iokit.IOHIDDeviceOpen.restype = c_int32
+iokit.IOHIDDeviceClose.argtypes = [c_void_p, c_uint32]
+iokit.IOHIDDeviceClose.restype = c_int32
 iokit.IOHIDDeviceRegisterInputValueCallback.argtypes = [c_void_p, c_void_p, c_void_p]
+iokit.IOHIDManagerClose.argtypes = [c_void_p, c_uint32]
+iokit.IOHIDManagerClose.restype = c_int32
 
 iokit.IOHIDValueGetElement.argtypes = [c_void_p]
 iokit.IOHIDValueGetElement.restype = c_void_p
@@ -175,6 +179,16 @@ class XboxController:
     def poll(self, timeout: float = 0.01):
         """Poll for events. Call this repeatedly from your main loop."""
         cf.CFRunLoopRunInMode(kCFRunLoopDefaultMode, timeout, False)
+
+    def disconnect(self):
+        """Disconnect from the controller and release resources."""
+        if self._device:
+            iokit.IOHIDDeviceClose(self._device, 0)
+            self._device = None
+        if self._manager:
+            iokit.IOHIDManagerClose(self._manager, 0)
+            self._manager = None
+        self._callback = None
 
     def _input_callback(self, context, result, sender, value):
         """HID input callback - fires on every input change."""
